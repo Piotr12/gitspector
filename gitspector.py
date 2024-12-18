@@ -17,17 +17,20 @@ def get_commits(repo, weeks):
     
     # Fetch commits from all branches
     branches_url = f"{API_BASE_URL}/repos/{repo}/branches"
+    print(".", end="", flush=True)  # Progress indicator
     response = requests.get(branches_url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
     branches = response.json()
     
     for branch in branches:
         branch_name = branch["name"]
         commits_url = f"{API_BASE_URL}/repos/{repo}/commits?sha={branch_name}&since={since_date.isoformat()}"
+        print(".", end="", flush=True)  # Progress indicator
         response = requests.get(commits_url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
         branch_commits = response.json()
         
         for commit in branch_commits:
             commit_url = commit["url"]
+            print(".", end="", flush=True)  # Progress indicator
             commit_response = requests.get(commit_url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
             commit_data = commit_response.json()
             
@@ -56,19 +59,25 @@ def get_pull_requests(repo, weeks):
     
     # Fetch closed pull requests
     pulls_url = f"{API_BASE_URL}/repos/{repo}/pulls?state=closed&sort=updated&direction=desc"
+    print(".", end="", flush=True)  # Progress indicator
     response = requests.get(pulls_url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
     closed_prs = response.json()
     
     for pr in closed_prs:
         if datetime.strptime(pr["closed_at"], "%Y-%m-%dT%H:%M:%SZ") >= since_date:
+            pr_url = pr['url']
+            print(".", end="", flush=True)  # Progress indicator
+            pr_details = requests.get(pr_url, headers={"Authorization": f"token {GITHUB_TOKEN}"}).json()
+            additions = pr_details['additions']
+            deletions = pr_details['deletions']
             pull_requests.append({
                 "number": pr["number"],
                 "title": pr["title"],
                 "author": pr["user"]["login"],
                 "from_branch": pr["head"]["ref"],
                 "to_branch": pr["base"]["ref"],
-                "additions": pr["additions"],
-                "deletions": pr["deletions"],
+                "additions": additions,
+                "deletions": deletions,
                 "created_at": pr["created_at"],
                 "closed_at": pr["closed_at"],
                 "wait_time": (datetime.strptime(pr["closed_at"], "%Y-%m-%dT%H:%M:%SZ") - datetime.strptime(pr["created_at"], "%Y-%m-%dT%H:%M:%SZ")).days
@@ -76,7 +85,7 @@ def get_pull_requests(repo, weeks):
     
     return pull_requests
 
-def generate_summary(commits, pull_requests):
+def generate_summary(commits, pull_requests, weeks):
     summary = {}
     
     # Count commits per author
@@ -100,6 +109,9 @@ def generate_summary(commits, pull_requests):
     # Convert working days set to count
     for author in summary:
         summary[author]["working_days"] = len(summary[author]["working_days"])
+        summary[author]["worked_percentage"] = summary[author]["working_days"] / (5*weeks)
+
+    
     
     # Convert summary dictionary to a list of dictionaries
     summary_list = []
@@ -122,18 +134,18 @@ def main(repos, weeks):
     for repo in repositories:
         commits = get_commits(repo, weeks)
         pull_requests = get_pull_requests(repo, weeks)
-        summary = generate_summary(commits, pull_requests)
+        summary = generate_summary(commits, pull_requests, weeks)
         
         commits_data.extend(commits)
         prs_data.extend(pull_requests)
         summary_data.extend(summary)
     
     # Create Excel writer
-    writer = pd.ExcelWriter("contributions_report.xlsx", engine="xlsxwriter")
+    writer = pd.ExcelWriter("gitspector_report.xlsx", engine="xlsxwriter")
     
     # Write commits data to Excel
     commits_df = pd.DataFrame(commits_data)
-    commits_df["URL"] = '=HYPERLINK("' + commits_df["url"] + '", "View Commit")'
+    #commits_df["URL"] = '=HYPERLINK("' + commits_df["url"] + '", "View Commit")'
     commits_df.to_excel(writer, sheet_name="Commits", index=False)
     
     # Write pull requests data to Excel
